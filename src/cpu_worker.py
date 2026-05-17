@@ -3,6 +3,7 @@ import ctypes
 import os
 import sys
 import logging
+import threading
 from typing import Optional
 from src.metrics import get_meter
 
@@ -110,10 +111,14 @@ class CPUWorker:
                 self.total_jitter += jitter
                 self.count += 1
 
+                avg = self.total_jitter / self.count
                 if self.count % 1000 == 0:
-                    avg = self.total_jitter / self.count
                     logger.info(f"Jitter (ns): min={self.min_jitter}, max={self.max_jitter}, avg={avg:.2f}")
                     self._update_otel(avg)
+
+                # Update shared state more frequently for UI (every 100 samples)
+                if self.count % 100 == 0:
+                    self._update_test_state(avg)
 
                 next_target += self.interval_ns
 
@@ -124,6 +129,19 @@ class CPUWorker:
 
         logger.info("CPU jitter test stopped")
         self.report()
+
+    def _update_test_state(self, avg):
+        try:
+            # We need a way to pass this back to the main app's test_state
+            # For now, let's assume we can import it or use a shared object
+            # But the app already handles this by joining.
+            # To have "live" updates, we can update a shared dict if passed
+            if hasattr(self, 'shared_res'):
+                self.shared_res['avg'] = avg
+                self.shared_res['max'] = self.max_jitter
+                self.shared_res['min'] = self.min_jitter
+        except Exception:
+            pass
 
     def _update_otel(self, avg):
         try:

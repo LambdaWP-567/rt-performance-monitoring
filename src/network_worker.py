@@ -4,6 +4,7 @@ import time
 import os
 import sys
 import logging
+import threading
 from typing import Optional
 from src.metrics import get_meter
 
@@ -79,10 +80,13 @@ class NetworkWorker:
                     self.total_rtt += rtt
                     self.count += 1
 
+                    avg = self.total_rtt / self.count
                     if self.count % 10 == 0:
-                        avg = self.total_rtt / self.count
                         logger.info(f"Network RTT (ms): min={self.min_rtt:.4f}, max={self.max_rtt:.4f}, avg={avg:.4f}")
                         self._update_otel(avg)
+
+                    # Update UI state for every sample (network tests are slower)
+                    self._update_test_state(avg)
 
                 sleep_time = self.interval_s - (time.time() - loop_start)
                 if sleep_time > 0:
@@ -98,6 +102,15 @@ class NetworkWorker:
 
         logger.info("Network RTT test stopped")
         self.report()
+
+    def _update_test_state(self, avg):
+        try:
+            if hasattr(self, 'shared_res'):
+                self.shared_res['avg'] = avg
+                self.shared_res['max'] = self.max_rtt
+                self.shared_res['min'] = self.min_rtt
+        except Exception:
+            pass
 
     def _update_otel(self, avg):
         try:

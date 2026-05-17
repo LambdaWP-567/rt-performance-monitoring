@@ -1,4 +1,6 @@
 from fastapi import FastAPI, BackgroundTasks
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import threading
 import time
 import logging
@@ -57,6 +59,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="RT Performance Monitor", lifespan=lifespan)
 
+# Static UI
+@app.get("/")
+async def read_index():
+    return FileResponse('src/static/index.html')
+
 class TestConfig(BaseModel):
     duration_min: float = 15.0
     interval_cpu_ms: float = 1.0
@@ -70,12 +77,17 @@ def run_test_cycle(config: TestConfig):
     test_state.stop_event.clear()
 
     while not test_state.stop_event.is_set():
-        test_state.update(running=True, start_time=time.time(), duration=duration_s)
+        cpu_results = {"min": 0, "max": 0, "avg": 0}
+        net_results = {"min": 0, "max": 0, "avg": 0}
+        test_state.update(running=True, start_time=time.time(), duration=duration_s, cpu_results=cpu_results, net_results=net_results)
 
         logger.info(f"Starting test cycle: duration={config.duration_min}min, cyclic={config.cyclic}")
 
         cpu_worker = CPUWorker(interval_ms=config.interval_cpu_ms)
+        cpu_worker.shared_res = cpu_results
+
         net_worker = NetworkWorker(interface=config.interface, interval_s=config.interval_net_s)
+        net_worker.shared_res = net_results
 
         t1 = threading.Thread(target=cpu_worker.run, kwargs={'duration_s': duration_s, 'core': config.core, 'stop_event': test_state.stop_event})
         t2 = threading.Thread(target=net_worker.run, kwargs={'duration_s': duration_s, 'stop_event': test_state.stop_event})
@@ -97,7 +109,7 @@ def run_test_cycle(config: TestConfig):
             "avg": net_worker.total_rtt / net_worker.count if net_worker.count > 0 else 0
         }
 
-        test_state.update(cpu_results=cpu_res, net_results=net_res, rt_ready=cpu_worker.is_rt_ready())
+        test_state.update(rt_ready=cpu_worker.is_rt_ready())
 
         logger.info(f"Test cycle completed. Results: CPU Avg Jitter={cpu_res['avg']:.2f}ns, Net Avg RTT={net_res['avg']:.4f}ms")
 

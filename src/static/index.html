@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RT Performance Monitor</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #ff4d4d;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            color: #ff0000;
+            text-shadow: 0 0 10px #ff0000;
+            border-bottom: 2px solid #ff0000;
+            width: 100%;
+            text-align: center;
+            padding-bottom: 10px;
+        }
+        .container {
+            width: 80%;
+            max-width: 800px;
+            background-color: #2a2a2a;
+            padding: 20px;
+            border: 2px solid #ff4d4d;
+            box-shadow: 0 0 20px rgba(255, 77, 77, 0.2);
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-size: 0.8em;
+            text-transform: uppercase;
+        }
+        input, select {
+            background-color: #000;
+            border: 1px solid #ff4d4d;
+            color: #ff4d4d;
+            padding: 5px;
+        }
+        button {
+            background-color: #ff0000;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        button:hover {
+            background-color: #cc0000;
+            box-shadow: 0 0 10px #ff0000;
+        }
+        button#stopBtn {
+            background-color: #555;
+        }
+        .status-panel {
+            border: 1px solid #ff4d4d;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        .rt-status {
+            font-size: 2em;
+            text-align: center;
+            margin: 10px 0;
+            padding: 10px;
+            border: 2px solid #ff4d4d;
+        }
+        .rt-ready-yes {
+            color: #00ff00;
+            border-color: #00ff00;
+        }
+        .rt-ready-no {
+            color: #ff0000;
+            border-color: #ff0000;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .metric-box {
+            background-color: #000;
+            padding: 10px;
+            border-left: 4px solid #ff0000;
+        }
+        .metric-title {
+            font-size: 0.9em;
+            color: #888;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        .log {
+            margin-top: 20px;
+            background-color: #000;
+            height: 150px;
+            overflow-y: scroll;
+            padding: 10px;
+            font-size: 0.8em;
+            color: #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RT PERFORMANCE MONITOR</h1>
+
+        <div class="controls">
+            <div class="input-group">
+                <label>Duration (min)</label>
+                <input type="number" id="duration" value="15" step="0.1">
+            </div>
+            <div class="input-group">
+                <label>CPU Core</label>
+                <input type="number" id="core" value="1">
+            </div>
+            <div class="input-group">
+                <label>Cyclic</label>
+                <select id="cyclic">
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                </select>
+            </div>
+            <button id="startBtn">START TEST</button>
+            <button id="stopBtn">STOP</button>
+        </div>
+
+        <div class="status-panel">
+            <div id="testStatus">STATUS: IDLE</div>
+            <div id="rtJudgment" class="rt-status">WAITING FOR TEST...</div>
+
+            <div class="metrics">
+                <div class="metric-box">
+                    <div class="metric-title">CPU AVG JITTER</div>
+                    <div id="cpuAvg" class="metric-value">---</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">CPU MAX JITTER</div>
+                    <div id="cpuMax" class="metric-value">---</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">NET AVG RTT</div>
+                    <div id="netAvg" class="metric-value">---</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">NET MAX RTT</div>
+                    <div id="netMax" class="metric-value">---</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="log" id="log">
+            [SYSTEM] Ready for deployment.
+        </div>
+    </div>
+
+    <script>
+        const log = (msg) => {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        };
+
+        async function updateStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+
+                document.getElementById('testStatus').textContent = `STATUS: ${data.running ? 'RUNNING' : 'IDLE'} (${Math.round(data.elapsed_seconds)}s / ${Math.round(data.remaining_seconds + data.elapsed_seconds)}s)`;
+
+                if (data.results.cpu.avg !== undefined) {
+                    document.getElementById('cpuAvg').textContent = `${data.results.cpu.avg.toFixed(2)} ns`;
+                    document.getElementById('cpuMax').textContent = `${data.results.cpu.max} ns`;
+                    document.getElementById('netAvg').textContent = `${data.results.network.avg.toFixed(4)} ms`;
+                    document.getElementById('netMax').textContent = `${data.results.network.max.toFixed(4)} ms`;
+
+                    const judgmentDiv = document.getElementById('rtJudgment');
+                    if (data.rt_ready) {
+                        judgmentDiv.textContent = 'SYSTEM RT-READY';
+                        judgmentDiv.className = 'rt-status rt-ready-yes';
+                    } else {
+                        judgmentDiv.textContent = 'SYSTEM NOT RT-READY';
+                        judgmentDiv.className = 'rt-status rt-ready-no';
+                    }
+                }
+            } catch (err) {
+                console.error('Failed to fetch status', err);
+            }
+        }
+
+        document.getElementById('startBtn').onclick = async () => {
+            const config = {
+                duration_min: parseFloat(document.getElementById('duration').value),
+                core: parseInt(document.getElementById('core').value),
+                cyclic: document.getElementById('cyclic').value === 'true'
+            };
+
+            log(`Starting test: ${config.duration_min}min, core ${config.core}`);
+
+            const response = await fetch('/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            const result = await response.json();
+            log(result.status === 'started' ? 'Test cycle initiated.' : `Error: ${result.message}`);
+        };
+
+        document.getElementById('stopBtn').onclick = async () => {
+            log('Requesting stop...');
+            const response = await fetch('/stop', { method: 'POST' });
+            const result = await response.json();
+            log('Stop signal sent.');
+        };
+
+        // Poll status every 10 seconds as requested
+        setInterval(updateStatus, 10000);
+        updateStatus(); // Initial call
+    </script>
+</body>
+</html>
