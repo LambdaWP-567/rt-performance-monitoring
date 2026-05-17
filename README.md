@@ -42,6 +42,20 @@ export PYTHONPATH=$PYTHONPATH:.
 python src/app.py
 ```
 
+## Configuration
+
+The application can be configured using environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ENABLE_NET_TEST` | Set to `true` to enable Layer 2 network tests. | `false` |
+| `NET_INTERFACE` | The network interface to use for L2 tests. | `lo` |
+
+Example:
+```bash
+ENABLE_NET_TEST=true NET_INTERFACE=eth0 python src/app.py
+```
+
 ## How to Run a Test
 
 1. **Start a Test Cycle**:

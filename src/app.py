@@ -1,6 +1,7 @@
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+import os
 import threading
 import time
 import logging
@@ -76,6 +77,9 @@ def run_test_cycle(config: TestConfig):
     duration_s = config.duration_min * 60
     test_state.stop_event.clear()
 
+    enable_net = os.getenv("ENABLE_NET_TEST", "false").lower() == "true"
+    default_interface = os.getenv("NET_INTERFACE", config.interface)
+
     while not test_state.stop_event.is_set():
         cpu_results = {"min": 0, "max": 0, "avg": 0}
         net_results = {"min": 0, "max": 0, "avg": 0}
@@ -85,29 +89,34 @@ def run_test_cycle(config: TestConfig):
 
         cpu_worker = CPUWorker(interval_ms=config.interval_cpu_ms)
         cpu_worker.shared_res = cpu_results
-
-        net_worker = NetworkWorker(interface=config.interface, interval_s=config.interval_net_s)
-        net_worker.shared_res = net_results
-
         t1 = threading.Thread(target=cpu_worker.run, kwargs={'duration_s': duration_s, 'core': config.core, 'stop_event': test_state.stop_event})
-        t2 = threading.Thread(target=net_worker.run, kwargs={'duration_s': duration_s, 'stop_event': test_state.stop_event})
-
         t1.start()
-        t2.start()
+
+        t2 = None
+        if enable_net:
+            net_worker = NetworkWorker(interface=default_interface, interval_s=config.interval_net_s)
+            net_worker.shared_res = net_results
+            t2 = threading.Thread(target=net_worker.run, kwargs={'duration_s': duration_s, 'stop_event': test_state.stop_event})
+            t2.start()
+        else:
+            logger.info("Network test disabled via environment variable.")
 
         t1.join()
-        t2.join()
+        if t2:
+            t2.join()
 
         cpu_res = {
             "min": cpu_worker.min_jitter,
             "max": cpu_worker.max_jitter,
             "avg": cpu_worker.total_jitter / cpu_worker.count if cpu_worker.count > 0 else 0
         }
-        net_res = {
-            "min": net_worker.min_rtt,
-            "max": net_worker.max_rtt,
-            "avg": net_worker.total_rtt / net_worker.count if net_worker.count > 0 else 0
-        }
+        net_res = {"min": 0, "max": 0, "avg": 0}
+        if enable_net:
+            net_res = {
+                "min": net_worker.min_rtt,
+                "max": net_worker.max_rtt,
+                "avg": net_worker.total_rtt / net_worker.count if net_worker.count > 0 else 0
+            }
 
         test_state.update(rt_ready=cpu_worker.is_rt_ready())
 
@@ -146,4 +155,12 @@ async def stop_test():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+    except OSError as e:
+        if e.errno == 98:
+            print("\n[ERROR] Port 8000 is already in use.")
+            print("Please ensure no other instances of the RT monitor are running.")
+            print("To kill existing process: kill $(lsof -t -i:8000)\n")
+        else:
+            raise e
