@@ -26,6 +26,7 @@ class CPUWorker:
         self.max_jitter = float('-inf')
         self.total_jitter = 0
         self.count = 0
+        self.rt_threshold_ns = 100_000 # 100 microseconds
 
         self._setup_otel()
 
@@ -79,7 +80,7 @@ class CPUWorker:
         else:
             logger.info("Affinity not implemented for this platform")
 
-    def run(self, duration_s: Optional[float] = None, core: int = 0):
+    def run(self, duration_s: Optional[float] = None, core: int = 0, stop_event: Optional[threading.Event] = None):
         self._set_affinity(core)
         self.running = True
         start_time = time.time()
@@ -91,6 +92,9 @@ class CPUWorker:
 
         try:
             while self.running:
+                if stop_event and stop_event.is_set():
+                    self.running = False
+                    break
                 now = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
                 sleep_time = next_target - now
 
@@ -129,14 +133,25 @@ class CPUWorker:
         except Exception:
             pass
 
+    def is_rt_ready(self) -> bool:
+        """
+        Judge if the system is RT ready based on max jitter.
+        Threshold: 100 microseconds.
+        """
+        if self.count == 0:
+            return False
+        return self.max_jitter < self.rt_threshold_ns
+
     def report(self):
         if self.count > 0:
             avg = self.total_jitter / self.count
+            rt_ready = self.is_rt_ready()
             print(f"\n--- Final Results ---")
             print(f"Samples: {self.count}")
             print(f"Min Jitter: {self.min_jitter} ns")
             print(f"Max Jitter: {self.max_jitter} ns")
             print(f"Avg Jitter: {avg:.2f} ns")
+            print(f"RT Ready: {'YES' if rt_ready else 'NO'} (Threshold: {self.rt_threshold_ns} ns)")
 
 if __name__ == "__main__":
     import argparse

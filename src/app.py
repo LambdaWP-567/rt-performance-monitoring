@@ -21,8 +21,10 @@ class TestState:
         self.duration = 0
         self.cpu_results = {}
         self.net_results = {}
+        self.rt_ready = False
         self.cyclic = False
         self.thread = None
+        self.stop_event = threading.Event()
 
     def update(self, **kwargs):
         with self.lock:
@@ -38,6 +40,7 @@ class TestState:
                 "running": self.running,
                 "elapsed_seconds": elapsed,
                 "remaining_seconds": max(0, self.duration - elapsed) if self.duration else 0,
+                "rt_ready": self.rt_ready,
                 "results": {
                     "cpu": self.cpu_results,
                     "network": self.net_results
@@ -64,8 +67,9 @@ class TestConfig(BaseModel):
 
 def run_test_cycle(config: TestConfig):
     duration_s = config.duration_min * 60
+    test_state.stop_event.clear()
 
-    while True:
+    while not test_state.stop_event.is_set():
         test_state.update(running=True, start_time=time.time(), duration=duration_s)
 
         logger.info(f"Starting test cycle: duration={config.duration_min}min, cyclic={config.cyclic}")
@@ -73,8 +77,8 @@ def run_test_cycle(config: TestConfig):
         cpu_worker = CPUWorker(interval_ms=config.interval_cpu_ms)
         net_worker = NetworkWorker(interface=config.interface, interval_s=config.interval_net_s)
 
-        t1 = threading.Thread(target=cpu_worker.run, kwargs={'duration_s': duration_s, 'core': config.core})
-        t2 = threading.Thread(target=net_worker.run, kwargs={'duration_s': duration_s})
+        t1 = threading.Thread(target=cpu_worker.run, kwargs={'duration_s': duration_s, 'core': config.core, 'stop_event': test_state.stop_event})
+        t2 = threading.Thread(target=net_worker.run, kwargs={'duration_s': duration_s, 'stop_event': test_state.stop_event})
 
         t1.start()
         t2.start()
@@ -93,7 +97,7 @@ def run_test_cycle(config: TestConfig):
             "avg": net_worker.total_rtt / net_worker.count if net_worker.count > 0 else 0
         }
 
-        test_state.update(cpu_results=cpu_res, net_results=net_res)
+        test_state.update(cpu_results=cpu_res, net_results=net_res, rt_ready=cpu_worker.is_rt_ready())
 
         logger.info(f"Test cycle completed. Results: CPU Avg Jitter={cpu_res['avg']:.2f}ns, Net Avg RTT={net_res['avg']:.4f}ms")
 
@@ -111,6 +115,7 @@ async def start_test(config: TestConfig):
         return {"status": "error", "message": "Test already running"}
 
     test_state.update(cyclic=config.cyclic)
+    test_state.stop_event.clear()
     thread = threading.Thread(target=run_test_cycle, args=(config,))
     test_state.update(thread=thread)
     thread.start()
@@ -123,6 +128,7 @@ async def get_status():
 
 @app.post("/stop")
 async def stop_test():
+    test_state.stop_event.set()
     test_state.update(running=False)
     return {"status": "stopping"}
 

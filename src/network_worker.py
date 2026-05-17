@@ -54,7 +54,7 @@ class NetworkWorker:
             logger.warning(f"Raw sockets not fully implemented for {sys.platform}. Using mock mode.")
             self.sock = None
 
-    def run(self, duration_s: Optional[float] = None):
+    def run(self, duration_s: Optional[float] = None, stop_event: Optional[threading.Event] = None):
         self._setup_socket()
         self.running = True
         start_time = time.time()
@@ -63,6 +63,9 @@ class NetworkWorker:
 
         try:
             while self.running:
+                if stop_event and stop_event.is_set():
+                    self.running = False
+                    break
                 loop_start = time.time()
 
                 if self.sock:
