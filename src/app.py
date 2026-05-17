@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from src.cpu_worker import CPUWorker
 from src.network_worker import NetworkWorker
 from src.metrics import setup_metrics
+from src.version import VERSION
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger("rt_app")
@@ -54,6 +55,7 @@ test_state = TestState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info(f"RT Performance Monitor Version {VERSION} Starting...")
     setup_metrics()
     yield
     # Cleanup if needed
@@ -120,7 +122,7 @@ def run_test_cycle(config: TestConfig):
 
         test_state.update(rt_ready=cpu_worker.is_rt_ready())
 
-        logger.info(f"Test cycle completed. Results: CPU Avg Jitter={cpu_res['avg']:.2f}ns, Net Avg RTT={net_res['avg']:.4f}ms")
+        logger.info(f"Test cycle completed. Results: CPU Avg Jitter={cpu_res['avg']:.2f}ns, Net Avg RTT={'N/A' if not enable_net else f'{net_res['avg']:.4f}ms'}")
 
         if not config.cyclic or not test_state.running:
             break
@@ -145,7 +147,9 @@ async def start_test(config: TestConfig):
 
 @app.get("/status")
 async def get_status():
-    return test_state.get_dict()
+    status = test_state.get_dict()
+    status["version"] = VERSION
+    return status
 
 @app.post("/stop")
 async def stop_test():
@@ -155,12 +159,14 @@ async def stop_test():
 
 if __name__ == "__main__":
     import uvicorn
+    port = int(os.getenv("APP_PORT", 8000))
     try:
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        uvicorn.run(app, host="0.0.0.0", port=port)
     except OSError as e:
         if e.errno == 98:
-            print("\n[ERROR] Port 8000 is already in use.")
+            print(f"\n[ERROR] Port {port} is already in use.")
             print("Please ensure no other instances of the RT monitor are running.")
-            print("To kill existing process: kill $(lsof -t -i:8000)\n")
+            print(f"To kill existing process: kill $(lsof -t -i:{port})")
+            print("Or change port using APP_PORT environment variable.\n")
         else:
             raise e
