@@ -56,6 +56,11 @@ test_state = TestState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"RT Performance Monitor Version {VERSION} Starting...")
+
+    enable_net = os.getenv("ENABLE_NET_TEST", "false").lower() == "true"
+    net_iface = os.getenv("NET_INTERFACE", "lo")
+    logger.info(f"Network Performance Test: {'ENABLED on ' + net_iface if enable_net else 'DISABLED (Opt-in via ENABLE_NET_TEST=true)'}")
+
     setup_metrics()
     yield
     # Cleanup if needed
@@ -159,14 +164,33 @@ async def stop_test():
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("APP_PORT", 8000))
+    import socket
+
+    def is_port_in_use(port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex(('localhost', port)) == 0
+
+    requested_port = os.getenv("APP_PORT")
+    if requested_port:
+        port = int(requested_port)
+    else:
+        # Auto-fallback if port 8000 is taken and no specific port requested
+        port = 8000
+        while is_port_in_use(port) and port < 8010:
+            port += 1
+
+    if port != 8000 and not requested_port:
+        print(f"[INFO] Port 8000 was busy. Auto-selected Port {port} for Web UI.")
+
     try:
         uvicorn.run(app, host="0.0.0.0", port=port)
     except OSError as e:
         if e.errno == 98:
-            print(f"\n[ERROR] Port {port} is already in use.")
+            print(f"\n[ERROR] The Web UI Dashboard could not start because Port {port} is already in use.")
+            print("This is NOT a Network Performance Test error, but a conflict for the Web server.")
             print("Please ensure no other instances of the RT monitor are running.")
             print(f"To kill existing process: kill $(lsof -t -i:{port})")
-            print("Or change port using APP_PORT environment variable.\n")
+            print("Or change the Dashboard port using APP_PORT environment variable (e.g. APP_PORT=8080).\n")
+            os._exit(1)
         else:
             raise e
