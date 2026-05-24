@@ -1,8 +1,12 @@
+import sys
+import os
+
+# Add the project root to sys.path to support standalone execution
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import socket
 import struct
 import time
-import os
-import sys
 import logging
 import threading
 from typing import Optional

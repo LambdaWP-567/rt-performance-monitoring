@@ -38,7 +38,6 @@ docker run --privileged --network host rt-monitor
 ### Manual Execution
 
 ```bash
-export PYTHONPATH=$PYTHONPATH:.
 python src/app.py
 ```
 

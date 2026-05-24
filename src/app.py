@@ -1,7 +1,12 @@
+import sys
+import os
+
+# Add the project root to sys.path to support standalone execution
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-import os
 import threading
 import time
 import logging
