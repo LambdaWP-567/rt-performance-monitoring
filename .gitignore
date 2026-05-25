@@ -7,3 +7,4 @@ app_v101.log
 app_verify_no_net.log
 app_verify_v101.log
 verification/
+/venv/
