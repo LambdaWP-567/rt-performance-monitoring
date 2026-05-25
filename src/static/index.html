@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RT Performance Monitor</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #ff4d4d;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            color: #ff0000;
+            text-shadow: 0 0 10px #ff0000;
+            border-bottom: 2px solid #ff0000;
+            width: 100%;
+            text-align: center;
+            padding-bottom: 10px;
+        }
+        .container {
+            width: 80%;
+            max-width: 800px;
+            background-color: #2a2a2a;
+            padding: 20px;
+            border: 2px solid #ff4d4d;
+            box-shadow: 0 0 20px rgba(255, 77, 77, 0.2);
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-size: 0.8em;
+            text-transform: uppercase;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        input, select {
+            background-color: #000;
+            border: 1px solid #ff4d4d;
+            color: #ff4d4d;
+            padding: 5px;
+        }
+        button {
+            background-color: #ff0000;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        button:hover {
+            background-color: #cc0000;
+            box-shadow: 0 0 10px #ff0000;
+        }
+        button#stopBtn {
+            background-color: #555;
+        }
+        button#resetBtn {
+            background-color: transparent;
+            border: 1px solid #993300;
+            color: #cc4400;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        button#resetBtn:hover {
+            background-color: #3a0000;
+            border-color: #ff4d4d;
+            color: #ff4d4d;
+            box-shadow: 0 0 8px rgba(255, 77, 0, 0.5);
+        }
+        .info-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 1px solid #ff4d4d;
+            color: #ff4d4d;
+            font-size: 0.7em;
+            font-style: normal;
+            cursor: help;
+            position: relative;
+            vertical-align: middle;
+            margin-left: 4px;
+            flex-shrink: 0;
+        }
+        .info-icon::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #111;
+            color: #ccc;
+            border: 1px solid #ff4d4d;
+            padding: 8px 10px;
+            font-size: 0.85em;
+            font-style: normal;
+            text-transform: none;
+            white-space: normal;
+            width: 230px;
+            line-height: 1.5;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.15s;
+            z-index: 100;
+        }
+        .info-icon:hover::after {
+            opacity: 1;
+        }
+        .status-panel {
+            border: 1px solid #ff4d4d;
+            padding: 15px;
+            margin-top: 20px;
+        }
+        .rt-status {
+            font-size: 2em;
+            text-align: center;
+            margin: 10px 0;
+            padding: 10px;
+            border: 2px solid #ff4d4d;
+        }
+        .rt-ready-yes {
+            color: #00ff00;
+            border-color: #00ff00;
+        }
+        .rt-ready-no {
+            color: #ff0000;
+            border-color: #ff0000;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .metric-box {
+            background-color: #000;
+            padding: 10px;
+            border-left: 4px solid #ff0000;
+        }
+        .metric-title {
+            font-size: 0.9em;
+            color: #888;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        .log {
+            margin-top: 20px;
+            background-color: #000;
+            height: 150px;
+            overflow-y: scroll;
+            padding: 10px;
+            font-size: 0.8em;
+            color: #00ff00;
+        }
+
+        /* ── Criteria panel ───────────────────────────────────── */
+        .criteria-container {
+            margin-top: 16px;
+        }
+        .criteria-container h2 {
+            color: #ff0000;
+            font-size: 0.9em;
+            letter-spacing: 2px;
+            margin: 0 0 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #3a3a3a;
+        }
+        .criteria-text {
+            font-size: 0.78em;
+            color: #999;
+            line-height: 1.7;
+            margin-bottom: 18px;
+        }
+        .criteria-text strong { color: #ff4d4d; }
+        .criteria-text em     { color: #ff9966; font-style: normal; }
+        .criteria-text code   { background: #000; padding: 1px 5px; color: #ff4d4d; }
+
+        /* Slider */
+        .threshold-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            font-size: 0.8em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .threshold-value {
+            color: #ff9900;
+            font-size: 1.15em;
+            font-weight: bold;
+        }
+        .threshold-slider {
+            width: 100%;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            background: linear-gradient(to right, #00cc44, #ffaa00, #ff3300);
+            outline: none;
+            border: none;
+            cursor: pointer;
+            margin-bottom: 4px;
+        }
+        .threshold-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #ff2200;
+            cursor: pointer;
+            box-shadow: 0 0 7px #ff2200;
+        }
+        .threshold-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #ff2200;
+            cursor: pointer;
+            box-shadow: 0 0 7px #ff2200;
+            border: none;
+        }
+        .slider-scale {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.62em;
+            color: #444;
+            margin-bottom: 18px;
+        }
+
+        /* Reference table */
+        .reference-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.78em;
+            margin-bottom: 14px;
+        }
+        .reference-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid #222;
+        }
+        .reference-table tr:last-child td { border-bottom: none; }
+        .ref-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+            vertical-align: middle;
+        }
+        .ref-range  { font-weight: bold; white-space: nowrap; }
+        .ref-desc   { color: #777; }
+        .tier-1 .ref-dot { background: #00ff44; }
+        .tier-1 .ref-range { color: #00ff44; }
+        .tier-2 .ref-dot { background: #aaff00; }
+        .tier-2 .ref-range { color: #aaff00; }
+        .tier-3 .ref-dot { background: #ffaa00; }
+        .tier-3 .ref-range { color: #ffaa00; }
+        .tier-4 .ref-dot { background: #ff3300; }
+        .tier-4 .ref-range { color: #ff3300; }
+
+        /* Apply row */
+        .threshold-apply {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        .threshold-note {
+            font-size: 0.72em;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RT PERFORMANCE MONITOR <span id="versionLabel" style="font-size: 0.3em; vertical-align: middle; opacity: 0.7;"></span></h1>
+
+        <div class="controls">
+            <div class="input-group">
+                <label>Duration (min)</label>
+                <input type="number" id="duration" value="15" step="0.1">
+            </div>
+            <div class="input-group">
+                <label>CPU Core</label>
+                <input type="number" id="core" value="1">
+            </div>
+            <div class="input-group">
+                <label>Cyclic
+                    <span class="info-icon" data-tooltip="No: Run once for the configured duration, then stop. Results stay visible until reset or a new test starts.&#10;&#10;Yes: Automatically restart each cycle indefinitely. Every new cycle overwrites the previous results. Stop manually to end.">i</span>
+                </label>
+                <select id="cyclic">
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                </select>
+            </div>
+            <button id="startBtn">START TEST</button>
+            <button id="stopBtn">STOP</button>
+            <button id="resetBtn">RESET</button>
+        </div>
+
+        <div class="status-panel">
+            <div id="testStatus">STATUS: IDLE</div>
+            <div id="rtJudgment" class="rt-status">WAITING FOR TEST...</div>
+
+            <div class="metrics">
+                <div class="metric-box">
+                    <div class="metric-title">CPU AVG JITTER</div>
+                    <div id="cpuAvg" class="metric-value">---</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">CPU MAX JITTER</div>
+                    <div id="cpuMax" class="metric-value">---</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">NET AVG RTT</div>
+                    <div id="netAvg" class="metric-value">---</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-title">NET MAX RTT</div>
+                    <div id="netMax" class="metric-value">---</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="log" id="log">
+            [SYSTEM] Ready for deployment.
+        </div>
+    </div>
+
+    <div class="container criteria-container">
+        <h2>RT-READINESS CRITERIA</h2>
+
+        <p class="criteria-text">
+            A system is judged <strong>RT-Ready</strong> when <em>every single</em> measured CPU
+            wake-up stays within the threshold — one outlier is enough to fail. Jitter is the gap
+            between the scheduled and actual wake time, sampled at 1 ms intervals via
+            <code>nanosleep</code> on a monotonic clock with the thread at
+            <code>SCHED_FIFO</code> priority.
+        </p>
+
+        <div class="threshold-header">
+            <span>CPU Max Jitter Threshold</span>
+            <span class="threshold-value" id="thresholdDisplay">100 µs</span>
+        </div>
+        <input type="range" class="threshold-slider" id="jitterSlider"
+               min="10" max="2000" step="10" value="100">
+        <div class="slider-scale">
+            <span>10 µs</span>
+            <span>500 µs</span>
+            <span>1000 µs</span>
+            <span>1500 µs</span>
+            <span>2000 µs</span>
+        </div>
+
+        <table class="reference-table">
+            <tr class="tier-1">
+                <td><span class="ref-dot"></span><span class="ref-range">&lt;&nbsp;20 µs</span></td>
+                <td class="ref-desc">PREEMPT_RT patched kernel — hard real-time, motion control, fast PLC</td>
+            </tr>
+            <tr class="tier-2">
+                <td><span class="ref-dot"></span><span class="ref-range">&lt;&nbsp;100 µs</span></td>
+                <td class="ref-desc">RT-capable — default threshold, suitable for soft real-time tasks</td>
+            </tr>
+            <tr class="tier-3">
+                <td><span class="ref-dot"></span><span class="ref-range">&lt;&nbsp;500 µs</span></td>
+                <td class="ref-desc">Standard Linux — non-RT use only; interactive and batch workloads</td>
+            </tr>
+            <tr class="tier-4">
+                <td><span class="ref-dot"></span><span class="ref-range">&gt;&nbsp;500 µs</span></td>
+                <td class="ref-desc">High jitter — VM, aggressive power-saving, or heavy background load</td>
+            </tr>
+        </table>
+
+        <div class="threshold-apply">
+            <button id="applyThresholdBtn">APPLY THRESHOLD</button>
+            <span class="threshold-note">Saved threshold is used on the next test start.</span>
+        </div>
+    </div>
+
+    <script>
+        let lastMaxJitter = null;
+
+        const log = (msg) => {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        };
+
+        // Re-evaluate the RT verdict from the last known max jitter + current slider value.
+        // Called both from the status poll and from the slider's oninput handler so that
+        // dragging the slider gives immediate visual feedback without a server round-trip.
+        function updateJudgment() {
+            if (lastMaxJitter === null) return;
+            const thresholdNs = parseInt(document.getElementById('jitterSlider').value) * 1000;
+            const ready = lastMaxJitter < thresholdNs;
+            const j = document.getElementById('rtJudgment');
+            j.textContent = ready ? 'SYSTEM RT-READY' : 'SYSTEM NOT RT-READY';
+            j.className   = ready ? 'rt-status rt-ready-yes' : 'rt-status rt-ready-no';
+        }
+
+        async function updateStatus() {
+            try {
+                const response = await fetch('/status');
+                const data = await response.json();
+
+                document.getElementById('testStatus').textContent =
+                    `STATUS: ${data.running ? 'RUNNING' : 'IDLE'} ` +
+                    `(${Math.round(data.elapsed_seconds)}s / ` +
+                    `${Math.round(data.remaining_seconds + data.elapsed_seconds)}s)`;
+
+                document.getElementById('versionLabel').textContent = `v${data.version}`;
+
+                if (data.results.cpu.avg !== undefined) {
+                    document.getElementById('cpuAvg').textContent = `${data.results.cpu.avg.toFixed(2)} ns`;
+                    document.getElementById('cpuMax').textContent = `${data.results.cpu.max} ns`;
+                    document.getElementById('netAvg').textContent = `${data.results.network.avg.toFixed(4)} ms`;
+                    document.getElementById('netMax').textContent = `${data.results.network.max.toFixed(4)} ms`;
+                    lastMaxJitter = data.results.cpu.max;
+                    updateJudgment();
+                }
+            } catch (err) {
+                console.error('Failed to fetch status', err);
+            }
+        }
+
+        document.getElementById('startBtn').onclick = async () => {
+            const config = {
+                duration_min: parseFloat(document.getElementById('duration').value),
+                core: parseInt(document.getElementById('core').value),
+                cyclic: document.getElementById('cyclic').value === 'true'
+            };
+            log(`Starting test: ${config.duration_min}min, core ${config.core}`);
+            const response = await fetch('/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            const result = await response.json();
+            log(result.status === 'started' ? 'Test cycle initiated.' : `Error: ${result.message}`);
+        };
+
+        document.getElementById('stopBtn').onclick = async () => {
+            log('Requesting stop...');
+            await fetch('/stop', { method: 'POST' });
+            log('Stop signal sent.');
+        };
+
+        document.getElementById('resetBtn').onclick = async () => {
+            const response = await fetch('/reset', { method: 'POST' });
+            const result = await response.json();
+            if (result.status === 'error') {
+                log(`Reset failed: ${result.message}`);
+                return;
+            }
+            lastMaxJitter = null;
+            document.getElementById('cpuAvg').textContent = '---';
+            document.getElementById('cpuMax').textContent = '---';
+            document.getElementById('netAvg').textContent = '---';
+            document.getElementById('netMax').textContent = '---';
+            const j = document.getElementById('rtJudgment');
+            j.textContent = 'WAITING FOR TEST...';
+            j.className = 'rt-status';
+            document.getElementById('testStatus').textContent = 'STATUS: IDLE';
+            log('Results cleared.');
+        };
+
+        // Slider — live re-evaluation as the user drags
+        document.getElementById('jitterSlider').oninput = function () {
+            document.getElementById('thresholdDisplay').textContent = `${this.value} µs`;
+            updateJudgment();
+        };
+
+        // Persist the chosen threshold to the server
+        document.getElementById('applyThresholdBtn').onclick = async () => {
+            const us = parseInt(document.getElementById('jitterSlider').value);
+            const response = await fetch('/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cpu_jitter_threshold_us: us })
+            });
+            const result = await response.json();
+            if (result.status === 'updated') {
+                log(`Threshold saved: ${us} µs — applies to next test.`);
+            } else {
+                log(`Threshold update failed: ${result.message}`);
+            }
+        };
+
+        // Sync slider to whatever the server currently has on load
+        async function loadConfig() {
+            try {
+                const response = await fetch('/config');
+                const cfg = await response.json();
+                const us = Math.round(cfg.cpu_jitter_threshold_us);
+                document.getElementById('jitterSlider').value = us;
+                document.getElementById('thresholdDisplay').textContent = `${us} µs`;
+            } catch (e) { /* ignore — defaults are fine */ }
+        }
+
+        setInterval(updateStatus, 2000);
+        loadConfig();
+        updateStatus();
+    </script>
+</body>
+</html>

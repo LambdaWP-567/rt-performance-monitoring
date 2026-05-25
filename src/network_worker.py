@@ -1,17 +1,27 @@
+import sys
+import os
+
+# Add the project root to sys.path to support standalone execution
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import socket
 import struct
 import time
-import os
-import sys
 import logging
+import threading
 from typing import Optional
 from src.metrics import get_meter
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger("network_worker")
 
-# Custom EtherType for our test
-ETH_P_RT = 0x88B5 # Local Experimental EtherType
+# Stored as plain str so static analysers cannot narrow it to a platform literal,
+# keeping the cross-platform branches reachable in their eyes.
+_PLATFORM: str = sys.platform
+
+# Local Experimental EtherType (IEEE 802 reserved for private use)
+ETH_P_RT = 0x88B5
+_ETHERTYPE_BYTES = struct.pack("!H", ETH_P_RT)
+
 
 class NetworkWorker:
     def __init__(self, interface: str = "lo", interval_s: float = 1.0):
@@ -19,6 +29,7 @@ class NetworkWorker:
         self.interval_s = interval_s
         self.running = False
         self.sock = None
+        self._seq = 0
 
         self.min_rtt = float('inf')
         self.max_rtt = float('-inf')
@@ -37,13 +48,21 @@ class NetworkWorker:
             logger.warning(f"OTel setup failed: {e}")
 
     def _setup_socket(self):
-        if sys.platform == "linux":
+        if _PLATFORM == "linux":
             try:
-                # AF_PACKET, SOCK_RAW
                 self.sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_RT))
                 self.sock.bind((self.interface, 0))
                 self.sock.settimeout(0.5)
-                logger.info(f"Opened raw socket on {self.interface} (Linux)")
+                if self.interface == "lo":
+                    logger.debug(
+                        f"Opened raw socket on '{self.interface}' (Linux). "
+                        "Measuring kernel loopback echo latency — not a remote-device RTT."
+                    )
+                else:
+                    logger.debug(
+                        f"Opened raw socket on '{self.interface}' (Linux). "
+                        "Measuring L2 round-trip time. A remote reflector must echo EtherType 0x88B5 frames."
+                    )
             except PermissionError:
                 logger.warning("Permission denied for raw socket. Using mock mode.")
                 self.sock = None
@@ -51,10 +70,10 @@ class NetworkWorker:
                 logger.error(f"Failed to setup raw socket: {e}")
                 self.sock = None
         else:
-            logger.warning(f"Raw sockets not fully implemented for {sys.platform}. Using mock mode.")
+            logger.warning(f"Raw sockets not fully implemented for {_PLATFORM}. Using mock mode.")
             self.sock = None
 
-    def run(self, duration_s: Optional[float] = None):
+    def run(self, duration_s: Optional[float] = None, stop_event: Optional[threading.Event] = None):
         self._setup_socket()
         self.running = True
         start_time = time.time()
@@ -63,6 +82,9 @@ class NetworkWorker:
 
         try:
             while self.running:
+                if stop_event and stop_event.is_set():
+                    self.running = False
+                    break
                 loop_start = time.time()
 
                 if self.sock:
@@ -76,10 +98,12 @@ class NetworkWorker:
                     self.total_rtt += rtt
                     self.count += 1
 
+                    avg = self.total_rtt / self.count
                     if self.count % 10 == 0:
-                        avg = self.total_rtt / self.count
-                        logger.info(f"Network RTT (ms): min={self.min_rtt:.4f}, max={self.max_rtt:.4f}, avg={avg:.4f}")
+                        logger.debug(f"Network RTT (ms): min={self.min_rtt:.4f}, max={self.max_rtt:.4f}, avg={avg:.4f}")
                         self._update_otel(avg)
+
+                    self._update_test_state(avg)
 
                 sleep_time = self.interval_s - (time.time() - loop_start)
                 if sleep_time > 0:
@@ -96,6 +120,21 @@ class NetworkWorker:
         logger.info("Network RTT test stopped")
         self.report()
 
+    def _update_test_state(self, avg):
+        if not hasattr(self, 'shared_res'):
+            return
+        data = {
+            'avg': avg,
+            'max': self.max_rtt,
+            'min': self.min_rtt,
+        }
+        lock = getattr(self, 'shared_res_lock', None)
+        if lock:
+            with lock:
+                self.shared_res.update(data)
+        else:
+            self.shared_res.update(data)
+
     def _update_otel(self, avg):
         try:
             self.otel_max_rtt.set(self.max_rtt)
@@ -105,34 +144,38 @@ class NetworkWorker:
             pass
 
     def _measure_real_rtt(self) -> Optional[float]:
-        # Construct a simple L2 frame
-        # Dest MAC (6 bytes), Src MAC (6 bytes), EtherType (2 bytes), Payload
-        # We use dummy MACs for local loopback test if interface is lo
         dst_mac = b'\xff\xff\xff\xff\xff\xff'
         src_mac = b'\x00\x00\x00\x00\x00\x00'
-        payload = struct.pack("!Q", int(time.time_ns()))
-        frame = dst_mac + src_mac + struct.pack("!H", ETH_P_RT) + payload
+        seq_bytes = struct.pack("!Q", self._seq)
+        self._seq += 1
+        frame = dst_mac + src_mac + _ETHERTYPE_BYTES + seq_bytes + struct.pack("!Q", time.time_ns())
 
         try:
             t_send = time.perf_counter()
             self.sock.send(frame)
 
-            data = self.sock.recv(2048)
-            t_recv = time.perf_counter()
-
-            return (t_recv - t_send) * 1000 # to ms
-        except socket.timeout:
-            return None
+            # Drain frames until we see our own echo identified by sequence number.
+            # This prevents false RTT readings from stray frames with the same EtherType.
+            deadline = t_send + self.sock.gettimeout()  # type: ignore[union-attr]
+            while True:
+                try:
+                    data = self.sock.recv(2048)
+                    t_recv = time.perf_counter()
+                    if (len(data) >= 22
+                            and data[12:14] == _ETHERTYPE_BYTES
+                            and data[14:22] == seq_bytes):
+                        return (t_recv - t_send) * 1000
+                    if t_recv >= deadline:
+                        return None
+                except socket.timeout:
+                    return None
         except Exception as e:
             logger.debug(f"Send/Recv error: {e}")
             return None
 
     def _measure_mock_rtt(self) -> float:
-        # Simulate a network latency between 0.1 and 2ms
         import random
-        base = 0.5
-        jitter = random.uniform(-0.1, 0.5)
-        return base + jitter
+        return 0.5 + random.uniform(-0.1, 0.5)
 
     def report(self):
         if self.count > 0:
@@ -142,6 +185,7 @@ class NetworkWorker:
             print(f"Min RTT: {self.min_rtt:.4f} ms")
             print(f"Max RTT: {self.max_rtt:.4f} ms")
             print(f"Avg RTT: {avg:.4f} ms")
+
 
 if __name__ == "__main__":
     import argparse
